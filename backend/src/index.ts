@@ -12,27 +12,40 @@ app.use('/*', cors())
 
 app.get('/', (c) => c.text('Duva API is running!'))
 
-// 1. UPDATED: The Registration Route
+// --- [ NEW: Fetch Master Data ] ---
+app.get('/master-data', async (c) => {
+  const supabase = createClient(c.env.SUPABASE_URL, c.env.SUPABASE_KEY)
+  try {
+    const { data: interests, error } = await supabase.from('master_interests').select('*').order('name')
+    if (error) throw error
+    return c.json({ success: true, interests })
+  } catch (error: any) {
+    return c.json({ success: false, error: error.message }, 500)
+  }
+})
+
+// --- [ UPDATED: The Registration Route ] ---
 app.post('/register', async (c) => {
   const supabase = createClient(c.env.SUPABASE_URL, c.env.SUPABASE_KEY)
   
   try {
     const body = await c.req.json()
 
-    // Step A: Create the secure authentication user
+    // 1. Create the Auth account
     const { data: authData, error: authError } = await supabase.auth.admin.createUser({
       email: body.email,
       password: body.password,
-      email_confirm: true // Skips the email verification step so you can test instantly
+      email_confirm: true 
     })
-
     if (authError) throw authError
 
-    // Step B: Save their public profile details, linking the new Auth ID
+    const newUserId = authData.user.id
+
+    // 2. Insert the main Profile data
     const { data: profileData, error: profileError } = await supabase
       .from('profiles')
       .insert([{
-        id: authData.user.id, // This permanently links the profile to the secure account!
+        id: newUserId,
         first_name: body.firstName,
         last_name: body.lastName,
         location: body.location,
@@ -40,11 +53,25 @@ app.post('/register', async (c) => {
         dob: body.dob,
         work: body.work,
         education: body.education,
-        gender_id: body.genderId
+        gender_id: body.genderId,
+        expectations: body.expectations 
       }])
       .select()
-
     if (profileError) throw profileError
+
+    // 3. Insert the Many-to-Many Interest Mappings
+    if (body.interestIds && body.interestIds.length > 0) {
+      const mappings = body.interestIds.map((interestId: number) => ({
+        profile_id: newUserId,
+        interest_id: interestId
+      }))
+
+      const { error: mappingError } = await supabase
+        .from('profile_interests')
+        .insert(mappings)
+      
+      if (mappingError) throw mappingError
+    }
 
     return c.json({ success: true, profile: profileData[0] })
 
@@ -207,10 +234,21 @@ app.post('/upload-photo', async (c) => {
       .getPublicUrl(fileName)
 
     // 3. Update the user's profile with this new image URL
-    // Note: We are storing it in the 'images' array column
+    // Fetch current profile to get existing images
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('images')
+      .eq('id', userId)
+      .single()
+
+    // Append the new image to the existing array (or create a new array if empty)
+    const currentImages = profile?.images || []
+    const updatedImages = [...currentImages, publicUrl]
+
+    // Update the profile with the combined array
     const { error: updateError } = await supabase
       .from('profiles')
-      .update({ images: [publicUrl] })
+      .update({ images: updatedImages })
       .eq('id', userId)
 
     if (updateError) throw updateError
