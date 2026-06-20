@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
 import { useRouter, Link } from 'expo-router';
+import { useAuth } from '../../context/AuthContext';
 
 export default function LoginScreen() {
   const router = useRouter();
+  const { setSession } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -23,7 +25,8 @@ export default function LoginScreen() {
       const result = await response.json();
 
       if (result.success) {
-        // We successfully verified the user! Move to the feed.
+        // Save the secure session globally!
+        setSession(result.session);
         router.replace('/(tabs)/explore');
       } else {
         setErrorMsg(result.error);

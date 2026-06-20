@@ -78,19 +78,148 @@ app.post('/login', async (c) => {
   }
 })
 
-// 3. The Pool Route (Fetching the feed)
+// 3. UPDATED: The Smart Pool Route
 app.get('/pool', async (c) => {
   const supabase = createClient(c.env.SUPABASE_URL, c.env.SUPABASE_KEY)
+  
+  // Grab the user ID from the URL query parameter
+  const userId = c.req.query('userId')
+
   try {
-    const { data, error } = await supabase
+    if (!userId) {
+      return c.json({ success: false, error: "Missing userId" }, 400)
+    }
+
+    // Step A: Find all the people this user has already swiped on
+    const { data: pastSwipes, error: swipeError } = await supabase
+      .from('swipes')
+      .select('swiped_id')
+      .eq('swiper_id', userId)
+
+    if (swipeError) throw swipeError
+
+    // Create a list of IDs to hide (include the user's own ID so they don't see themselves)
+    const hiddenIds = pastSwipes.map(swipe => swipe.swiped_id)
+    hiddenIds.push(userId)
+
+    // Step B: Fetch fresh profiles, explicitly excluding the hidden IDs
+    let query = supabase
       .from('profiles')
       .select('id, first_name, location, bio, dob, work, education, images')
       .limit(10)
 
+    if (hiddenIds.length > 0) {
+      // Supabase format for "NOT IN" requires a comma-separated string enclosed in parentheses
+      query = query.not('id', 'in', `(${hiddenIds.join(',')})`)
+    }
+
+    const { data, error } = await query
+
     if (error) throw error
     return c.json({ success: true, profiles: data })
+
   } catch (error: any) {
+    console.error("Pool Error:", error)
     return c.json({ success: false, error: error.message }, 500)
+  }
+})
+
+// 4. UPDATED: The Smart Swipe Route
+app.post('/swipe', async (c) => {
+  const supabase = createClient(c.env.SUPABASE_URL, c.env.SUPABASE_KEY)
+  
+  try {
+    const body = await c.req.json()
+
+    // Step A: Record the user's swipe
+    const { error } = await supabase
+      .from('swipes')
+      .insert([{
+        swiper_id: body.swiperId,
+        swiped_id: body.swipedId,
+        action: body.action
+      }])
+
+    // Ignore duplicate swipe errors so the app doesn't crash
+    if (error && error.code !== '23505') throw error
+
+    // Step B: The Match Engine
+    let isMatch = false;
+    
+    // If we just 'liked' someone, check if they already 'liked' us!
+    if (body.action === 'like') {
+      const { data: mutualSwipe } = await supabase
+        .from('swipes')
+        .select('id')
+        .eq('swiper_id', body.swipedId) // Did they swipe on...
+        .eq('swiped_id', body.swiperId) // ...us?
+        .eq('action', 'like')
+        .single() // We only need to know if one record exists
+
+      if (mutualSwipe) {
+        isMatch = true; // ✨ We have a connection!
+      }
+    }
+
+    // Send the result back to the phone instantly
+    return c.json({ success: true, match: isMatch })
+
+  } catch (error: any) {
+    console.error("Swipe Error:", error)
+    return c.json({ success: false, error: error.message }, 400)
+  }
+})
+
+// 5. NEW: The Image Upload Route
+app.post('/upload-photo', async (c) => {
+  const supabase = createClient(c.env.SUPABASE_URL, c.env.SUPABASE_KEY)
+  
+  try {
+    const body = await c.req.json()
+    const { userId, base64Image, extension } = body
+    
+    // Create a unique filename (e.g., user123-17000000.jpg)
+    const fileName = `${userId}-${Date.now()}.${extension}`
+
+    // Cloudflare Workers require us to convert Base64 into a raw Byte Array
+    const byteCharacters = atob(base64Image)
+    const byteNumbers = new Array(byteCharacters.length)
+    for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i)
+    }
+    const byteArray = new Uint8Array(byteNumbers)
+
+    // 1. Upload the image file to the "avatars" bucket
+    const { error: uploadError } = await supabase
+      .storage
+      .from('avatars')
+      .upload(fileName, byteArray, { 
+        contentType: `image/${extension}`,
+        upsert: true 
+      })
+
+    if (uploadError) throw uploadError
+
+    // 2. Get the public URL of the uploaded image
+    const { data: { publicUrl } } = supabase
+      .storage
+      .from('avatars')
+      .getPublicUrl(fileName)
+
+    // 3. Update the user's profile with this new image URL
+    // Note: We are storing it in the 'images' array column
+    const { error: updateError } = await supabase
+      .from('profiles')
+      .update({ images: [publicUrl] })
+      .eq('id', userId)
+
+    if (updateError) throw updateError
+
+    return c.json({ success: true, url: publicUrl })
+
+  } catch (error: any) {
+    console.error("Upload Error:", error)
+    return c.json({ success: false, error: error.message }, 400)
   }
 })
 
