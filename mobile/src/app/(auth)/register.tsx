@@ -1,4 +1,3 @@
-// mobile/src/app/(auth)/register.tsx
 import React, { useState } from 'react';
 import { StyleSheet, Text, TextInput, Button, ScrollView, View } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -6,14 +5,17 @@ import { useRouter } from 'expo-router';
 export default function RegisterScreen() {
   const router = useRouter();
   const [statusMessage, setStatusMessage] = useState('');
+  
+  // Added email and password to our state
   const [formData, setFormData] = useState({
-    firstName: '', lastName: '', location: '', bio: '',
-    dob: '2000-01-01', work: '', education: '', genderId: 1
+    email: '', password: '', firstName: '', lastName: '', 
+    location: '', bio: '', dob: '2000-01-01', 
+    work: '', education: '', genderId: 1
   });
 
   const handleRegister = async () => {
     try {
-      setStatusMessage('Saving to database...');
+      setStatusMessage('Creating your account...');
       const API_URL = 'http://localhost:8787/register';
 
       const response = await fetch(API_URL, {
@@ -25,11 +27,8 @@ export default function RegisterScreen() {
       const result = await response.json();
 
       if (result.success) {
-        setStatusMessage('✅ Success! Taking you to the pool...');
-        // Wait 1.5 seconds so they can see the success message, then navigate to the tabs
-        setTimeout(() => {
-          router.replace('/(tabs)/explore');
-        }, 1500);
+        setStatusMessage('✅ Account created! Taking you to the pool...');
+        setTimeout(() => router.replace('/(tabs)/explore'), 1500);
       } else {
         setStatusMessage('❌ Error: ' + result.error);
       }
@@ -42,6 +41,12 @@ export default function RegisterScreen() {
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.header}>Join Duva</Text>
 
+      {/* New Auth Fields */}
+      <Text style={styles.sectionTitle}>Account Details</Text>
+      <TextInput style={styles.input} placeholder="Email" autoCapitalize="none" onChangeText={(text) => setFormData({ ...formData, email: text })} />
+      <TextInput style={styles.input} placeholder="Password" secureTextEntry onChangeText={(text) => setFormData({ ...formData, password: text })} />
+      
+      <Text style={styles.sectionTitle}>Profile Details</Text>
       <TextInput style={styles.input} placeholder="First Name" onChangeText={(text) => setFormData({ ...formData, firstName: text })} />
       <TextInput style={styles.input} placeholder="Last Name" onChangeText={(text) => setFormData({ ...formData, lastName: text })} />
       <TextInput style={styles.input} placeholder="Location (e.g. Mumbai)" onChangeText={(text) => setFormData({ ...formData, location: text })} />
@@ -63,6 +68,7 @@ export default function RegisterScreen() {
 const styles = StyleSheet.create({
   container: { flexGrow: 1, padding: 24, justifyContent: 'center', backgroundColor: '#FAFAFA' },
   header: { fontSize: 32, fontWeight: 'bold', marginBottom: 30, textAlign: 'center', color: '#333' },
+  sectionTitle: { fontSize: 14, fontWeight: 'bold', color: '#888', textTransform: 'uppercase', marginBottom: 10, marginTop: 10 },
   input: { borderWidth: 1, borderColor: '#E0E0E0', backgroundColor: '#FFF', padding: 16, marginBottom: 16, borderRadius: 12, fontSize: 16 },
   textArea: { height: 100, textAlignVertical: 'top' },
   statusBox: { marginTop: 20, padding: 16, borderRadius: 8, backgroundColor: '#E8F5E9', alignItems: 'center' },

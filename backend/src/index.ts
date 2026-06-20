@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { cors } from 'hono/cors' // 1. Import CORS
+import { cors } from 'hono/cors'
 import { createClient } from '@supabase/supabase-js'
 
 type Bindings = {
@@ -8,66 +8,88 @@ type Bindings = {
 }
 
 const app = new Hono<{ Bindings: Bindings }>()
-
-// 2. Tell the server to allow requests from your web browser
 app.use('/*', cors())
 
-// Simple health check route
-app.get('/', (c) => {
-  return c.text('Duva API is running!')
-})
+app.get('/', (c) => c.text('Duva API is running!'))
 
-// The Profile Registration Route
+// 1. UPDATED: The Registration Route
 app.post('/register', async (c) => {
   const supabase = createClient(c.env.SUPABASE_URL, c.env.SUPABASE_KEY)
-
+  
   try {
     const body = await c.req.json()
 
-    const { data, error } = await supabase
+    // Step A: Create the secure authentication user
+    const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+      email: body.email,
+      password: body.password,
+      email_confirm: true // Skips the email verification step so you can test instantly
+    })
+
+    if (authError) throw authError
+
+    // Step B: Save their public profile details, linking the new Auth ID
+    const { data: profileData, error: profileError } = await supabase
       .from('profiles')
-      .insert([
-        {
-          first_name: body.firstName,
-          last_name: body.lastName,
-          location: body.location,
-          bio: body.bio,
-          dob: body.dob,
-          work: body.work,
-          education: body.education,
-          gender_id: body.genderId
-        }
-      ])
-      .select() 
+      .insert([{
+        id: authData.user.id, // This permanently links the profile to the secure account!
+        first_name: body.firstName,
+        last_name: body.lastName,
+        location: body.location,
+        bio: body.bio,
+        dob: body.dob,
+        work: body.work,
+        education: body.education,
+        gender_id: body.genderId
+      }])
+      .select()
 
-    if (error) throw error
+    if (profileError) throw profileError
 
-    return c.json({ success: true, profile: data[0] })
+    return c.json({ success: true, profile: profileData[0] })
 
   } catch (error: any) {
-    console.error("Database Error:", error)
+    console.error("Registration Error:", error)
     return c.json({ success: false, error: error.message }, 400)
   }
 })
 
-// 4. The Pool Route (Fetch profiles for the feed)
+// 2. NEW: The Login Route
+app.post('/login', async (c) => {
+  const supabase = createClient(c.env.SUPABASE_URL, c.env.SUPABASE_KEY)
+  
+  try {
+    const body = await c.req.json()
+
+    // Supabase securely checks the email and password
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: body.email,
+      password: body.password,
+    })
+
+    if (error) throw error
+
+    // Returns a secure session token
+    return c.json({ success: true, session: data.session })
+
+  } catch (error: any) {
+    console.error("Login Error:", error)
+    return c.json({ success: false, error: error.message }, 400)
+  }
+})
+
+// 3. The Pool Route (Fetching the feed)
 app.get('/pool', async (c) => {
   const supabase = createClient(c.env.SUPABASE_URL, c.env.SUPABASE_KEY)
-
   try {
-    // Fetch 10 random profiles from the database
-    // Later, we will add logic to exclude profiles the user has already swiped on
     const { data, error } = await supabase
       .from('profiles')
       .select('id, first_name, location, bio, dob, work, education, images')
       .limit(10)
 
     if (error) throw error
-
     return c.json({ success: true, profiles: data })
-
   } catch (error: any) {
-    console.error("Database Error:", error)
     return c.json({ success: false, error: error.message }, 500)
   }
 })
