@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
+import { cors } from 'hono/cors' // 1. Import CORS
 import { createClient } from '@supabase/supabase-js'
 
-// 1. Tell Hono about our environment variables
 type Bindings = {
   SUPABASE_URL: string
   SUPABASE_KEY: string
@@ -9,21 +9,21 @@ type Bindings = {
 
 const app = new Hono<{ Bindings: Bindings }>()
 
-// 2. Simple health check route
+// 2. Tell the server to allow requests from your web browser
+app.use('/*', cors())
+
+// Simple health check route
 app.get('/', (c) => {
   return c.text('Duva API is running!')
 })
 
-// 3. The Profile Registration Route
+// The Profile Registration Route
 app.post('/register', async (c) => {
-  // Initialize Supabase using the keys from .dev.vars
   const supabase = createClient(c.env.SUPABASE_URL, c.env.SUPABASE_KEY)
 
   try {
-    // Grab the data sent from the mobile app
     const body = await c.req.json()
 
-    // Insert the data into your 'profiles' table
     const { data, error } = await supabase
       .from('profiles')
       .insert([
@@ -32,23 +32,43 @@ app.post('/register', async (c) => {
           last_name: body.lastName,
           location: body.location,
           bio: body.bio,
-          dob: body.dob, // Format expected: YYYY-MM-DD
+          dob: body.dob,
           work: body.work,
           education: body.education,
           gender_id: body.genderId
         }
       ])
-      .select() // Ask Supabase to return the newly created record
+      .select() 
 
-    // If Supabase throws an error (like a missing required field), catch it
     if (error) throw error
 
-    // Send the success response back to the mobile app
     return c.json({ success: true, profile: data[0] })
 
   } catch (error: any) {
     console.error("Database Error:", error)
     return c.json({ success: false, error: error.message }, 400)
+  }
+})
+
+// 4. The Pool Route (Fetch profiles for the feed)
+app.get('/pool', async (c) => {
+  const supabase = createClient(c.env.SUPABASE_URL, c.env.SUPABASE_KEY)
+
+  try {
+    // Fetch 10 random profiles from the database
+    // Later, we will add logic to exclude profiles the user has already swiped on
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id, first_name, location, bio, dob, work, education, images')
+      .limit(10)
+
+    if (error) throw error
+
+    return c.json({ success: true, profiles: data })
+
+  } catch (error: any) {
+    console.error("Database Error:", error)
+    return c.json({ success: false, error: error.message }, 500)
   }
 })
 
